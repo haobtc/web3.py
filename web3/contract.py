@@ -896,33 +896,9 @@ class ContractFunction:
 
         self.arguments = merge_args_and_kwargs(self.abi, self.args, self.kwargs)
 
-    def call(
+    def call_prepare(
         self, transaction: Optional[TxParams] = None, block_identifier: BlockIdentifier='latest'
     ) -> Any:
-        """
-        Execute a contract function call using the `eth_call` interface.
-
-        This method prepares a ``Caller`` object that exposes the contract
-        functions and public variables as callable Python functions.
-
-        Reading a public ``owner`` address variable example:
-
-        .. code-block:: python
-
-            ContractFactory = w3.eth.contract(
-                abi=wallet_contract_definition["abi"]
-            )
-
-            # Not a real contract address
-            contract = ContractFactory("0x2f70d3d26829e412A602E83FE8EeBF80255AEeA5")
-
-            # Read "owner" public variable
-            addr = contract.functions.owner().call()
-
-        :param transaction: Dictionary of transaction info for web3 interface
-        :return: ``Caller`` object that has contract public functions
-            and variables exposed as Python methods
-        """
         if transaction is None:
             call_transaction: TxParams = {}
         else:
@@ -951,7 +927,7 @@ class ContractFunction:
 
         block_id = parse_block_identifier(self.web3, block_identifier)
 
-        return call_contract_function(
+        return call_contract_function_prepare(
             self.web3,
             self.address,
             self._return_data_normalizers,
@@ -964,7 +940,51 @@ class ContractFunction:
             **self.kwargs
         )
 
-    def transact(self, transaction: Optional[TxParams] = None) -> HexBytes:
+
+    def call(
+        self, transaction: Optional[TxParams] = None, block_identifier: BlockIdentifier='latest'
+    ) -> Any:
+        """
+        Execute a contract function call using the `eth_call` interface.
+
+        This method prepares a ``Caller`` object that exposes the contract
+        functions and public variables as callable Python functions.
+
+        Reading a public ``owner`` address variable example:
+
+        .. code-block:: python
+
+            ContractFactory = w3.eth.contract(
+                abi=wallet_contract_definition["abi"]
+            )
+
+            # Not a real contract address
+            contract = ContractFactory("0x2f70d3d26829e412A602E83FE8EeBF80255AEeA5")
+
+            # Read "owner" public variable
+            addr = contract.functions.owner().call()
+
+        :param transaction: Dictionary of transaction info for web3 interface
+        :return: ``Caller`` object that has contract public functions
+            and variables exposed as Python methods
+
+        """
+        call_transaction, next_args, next_kwargs = self.call_prepare(
+            transaction=transaction, block_identifier=block_identifier)
+
+        block_id = next_kwargs.get('block_id')
+        if block_id is None:
+            return_data = web3.eth.call(call_transaction)
+        else:
+            return_data = web3.eth.call(call_transaction, block_identifier=block_id)
+        return self.call_postpare(return_data, *next_args, **next_kwargs)
+
+    def call_postpare(self, return_data: Sequence[Any], *args, **kwargs):
+        return call_contract_function_postpare(
+            return_data, *args, **kwargs)
+
+
+    def transact_prepare(self, transaction: Optional[TxParams] = None) -> TxParams:
         if transaction is None:
             transact_transaction: TxParams = {}
         else:
@@ -990,7 +1010,7 @@ class ContractFunction:
                     "Please ensure that this contract instance has an address."
                 )
 
-        return transact_with_contract_function(
+        transact_transaction = transact_with_contract_function_prepare(
             self.address,
             self.web3,
             self.function_identifier,
@@ -1000,11 +1020,17 @@ class ContractFunction:
             *self.args,
             **self.kwargs
         )
+        return transact_transaction
 
-    def estimateGas(
+    def transact(self, transaction: Optional[TxParams] = None) -> HexBytes:
+        transaction = self.transact_prepare(transaction=transaction)
+        txn_hash = web3.eth.sendTransaction(transact_transaction)
+        return txn_hash
+
+    def estimateGas_prepare(
         self, transaction: Optional[TxParams] = None,
         block_identifier: Optional[BlockIdentifier] = None
-    ) -> int:
+    ) -> TxParams:
         if transaction is None:
             estimate_gas_transaction: TxParams = {}
         else:
@@ -1032,7 +1058,7 @@ class ContractFunction:
                     "Please ensure that this contract instance has an address."
                 )
 
-        return estimate_gas_for_function(
+        return estimate_gas_for_function_prepare(
             self.address,
             self.web3,
             self.function_identifier,
@@ -1043,6 +1069,16 @@ class ContractFunction:
             *self.args,
             **self.kwargs
         )
+
+    def estimateGas(
+        self, transaction: Optional[TxParams] = None,
+        block_identifier: Optional[BlockIdentifier] = None
+    ) -> int:
+        estimate_transaction = self.estimateGas_prepare(
+            transaction=transaction,
+            block_identifier=block_identifier)
+        return web3.eth.estimateGas(estimate_transaction, block_identifier)
+
 
     def buildTransaction(self, transaction: Optional[TxParams] = None) -> TxParams:
         """
@@ -1467,7 +1503,7 @@ def check_for_forbidden_api_filter_arguments(
                 "method.")
 
 
-def call_contract_function(
+def call_contract_function_prepare(
         web3: 'Web3',
         address: ChecksumAddress,
         normalizers: Tuple[Callable[..., Any], ...],
@@ -1477,7 +1513,7 @@ def call_contract_function(
         contract_abi: Optional[ABI] = None,
         fn_abi: Optional[ABIFunction] = None,
         *args: Any,
-        **kwargs: Any) -> Any:
+        **kwargs: Any) -> Tuple[TxParams, List[Any], Dict[str, Any]]:
     """
     Helper function for interacting with a contract function using the
     `eth_call` API.
@@ -1492,11 +1528,26 @@ def call_contract_function(
         fn_args=args,
         fn_kwargs=kwargs,
     )
+    next_args = [web3, address, normalizers, function_identfiers, transaction] + list(args)
+    next_kwargs = dict(block_id=block_id,
+                       contract_abi=contract_abi,
+                       fn_abi=fn_abi)
+    next_kwargs.update(kwargs)
 
-    if block_id is None:
-        return_data = web3.eth.call(call_transaction)
-    else:
-        return_data = web3.eth.call(call_transaction, block_identifier=block_id)
+    return call_transaction, next_args, next_kwargs
+
+def call_contract_function_postpare(
+        return_data: Sequence[Any],
+        web3: 'Web3',
+        address: ChecksumAddress,
+        normalizers: Tuple[Callable[..., Any], ...],
+        function_identifier: FunctionIdentifier,
+        transaction: TxParams,
+        block_id: Optional[BlockIdentifier] = None,
+        contract_abi: Optional[ABI] = None,
+        fn_abi: Optional[ABIFunction] = None,
+        *args: Any,
+        **kwargs: Any) -> Any:
 
     if fn_abi is None:
         fn_abi = find_matching_fn_abi(contract_abi, web3.codec, function_identifier, args, kwargs)
@@ -1539,7 +1590,6 @@ def call_contract_function(
     else:
         return normalized_data
 
-
 def parse_block_identifier(web3: 'Web3', block_identifier: BlockIdentifier) -> BlockIdentifier:
     if isinstance(block_identifier, int):
         return parse_block_identifier_int(web3, block_identifier)
@@ -1562,7 +1612,7 @@ def parse_block_identifier_int(web3: 'Web3', block_identifier_int: int) -> Block
     return BlockNumber(block_num)
 
 
-def transact_with_contract_function(
+def transact_with_contract_function_prepare(
         address: ChecksumAddress,
         web3: 'Web3',
         function_name: Optional[FunctionIdentifier] = None,
@@ -1585,12 +1635,10 @@ def transact_with_contract_function(
         fn_args=args,
         fn_kwargs=kwargs,
     )
-
-    txn_hash = web3.eth.sendTransaction(transact_transaction)
-    return txn_hash
+    return transact_transaction
 
 
-def estimate_gas_for_function(
+def estimate_gas_for_function_prepare(
         address: ChecksumAddress,
         web3: 'Web3',
         fn_identifier: Optional[FunctionIdentifier] = None,
@@ -1615,8 +1663,7 @@ def estimate_gas_for_function(
         fn_args=args,
         fn_kwargs=kwargs,
     )
-
-    return web3.eth.estimateGas(estimate_transaction, block_identifier)
+    return estimate_transaction
 
 
 def build_transaction_for_function(
