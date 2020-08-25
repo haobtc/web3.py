@@ -933,13 +933,11 @@ class ContractFunction:
             self._return_data_normalizers,
             self.function_identifier,
             call_transaction,
-            block_id,
-            self.contract_abi,
-            self.abi,
-            *self.args,
-            **self.kwargs
-        )
-
+            fn_args=self.args,
+            kw_args=self.kwargs,
+            block_id=block_id,
+            contract_abi=self.contract_abi,
+            fn_abi=self.abi)
 
     def call(
         self, transaction: Optional[TxParams] = None, block_identifier: BlockIdentifier='latest'
@@ -974,9 +972,9 @@ class ContractFunction:
 
         block_id = next_kwargs.get('block_id')
         if block_id is None:
-            return_data = web3.eth.call(call_transaction)
+            return_data: HexBytes = web3.eth.call(call_transaction)
         else:
-            return_data = web3.eth.call(call_transaction, block_identifier=block_id)
+            return_data: HexBytes = web3.eth.call(call_transaction, block_identifier=block_id)
         return self.call_postpare(return_data, *next_args, **next_kwargs)
 
     def call_postpare(self, return_data: Sequence[Any], *args, **kwargs):
@@ -1013,12 +1011,12 @@ class ContractFunction:
         transact_transaction = transact_with_contract_function_prepare(
             self.address,
             self.web3,
-            self.function_identifier,
-            transact_transaction,
-            self.contract_abi,
-            self.abi,
-            *self.args,
-            **self.kwargs
+            function_name=self.function_identifier,
+            transaction=transact_transaction,
+            contract_abi=self.contract_abi,
+            fn_abi=self.abi,
+            fn_args=self.args,
+            fn_kwargs=self.kwargs
         )
         return transact_transaction
 
@@ -1061,13 +1059,13 @@ class ContractFunction:
         return estimate_gas_for_function_prepare(
             self.address,
             self.web3,
-            self.function_identifier,
-            estimate_gas_transaction,
-            self.contract_abi,
-            self.abi,
-            block_identifier,
-            *self.args,
-            **self.kwargs
+            fn_identifier=self.function_identifier,
+            transaction=estimate_gas_transaction,
+            contract_abi=self.contract_abi,
+            fn_abi=self.abi,
+            block_identifier=block_identifier,
+            fn_args=self.args,
+            fn_kwargs=self.kwargs
         )
 
     def estimateGas(
@@ -1510,10 +1508,11 @@ def call_contract_function_prepare(
         function_identifier: FunctionIdentifier,
         transaction: TxParams,
         block_id: Optional[BlockIdentifier] = None,
+        fn_args: Optional[Any] = None,
+        fn_kwargs: Optional[Any] = None,
         contract_abi: Optional[ABI] = None,
         fn_abi: Optional[ABIFunction] = None,
-        *args: Any,
-        **kwargs: Any) -> Tuple[TxParams, List[Any], Dict[str, Any]]:
+) -> Tuple[TxParams, List[Any], Dict[str, Any]]:
     """
     Helper function for interacting with a contract function using the
     `eth_call` API.
@@ -1525,13 +1524,16 @@ def call_contract_function_prepare(
         contract_abi=contract_abi,
         fn_abi=fn_abi,
         transaction=transaction,
-        fn_args=args,
-        fn_kwargs=kwargs,
+        fn_args=fn_args,
+        fn_kwargs=fn_kwargs,
     )
-    next_args = [web3, address, normalizers, function_identfiers, transaction] + list(args)
-    next_kwargs = dict(block_id=block_id,
-                       contract_abi=contract_abi,
-                       fn_abi=fn_abi)
+    next_args = [web3, address, normalizers, function_identifier, transaction]
+    next_kwargs = dict(
+        block_id=block_id,
+        contract_abi=contract_abi,
+        fn_args=fn_args,
+        fn_kwargs=fn_kwargs,
+        fn_abi=fn_abi)
     next_kwargs.update(kwargs)
 
     return call_transaction, next_args, next_kwargs
@@ -1543,14 +1545,15 @@ def call_contract_function_postpare(
         normalizers: Tuple[Callable[..., Any], ...],
         function_identifier: FunctionIdentifier,
         transaction: TxParams,
+        fn_args: Optional[Any] = None,
+        fn_kwargs: Optional[Any] = None,
         block_id: Optional[BlockIdentifier] = None,
         contract_abi: Optional[ABI] = None,
-        fn_abi: Optional[ABIFunction] = None,
-        *args: Any,
-        **kwargs: Any) -> Any:
+        fn_abi: Optional[ABIFunction] = None
+    ) -> Any:
 
     if fn_abi is None:
-        fn_abi = find_matching_fn_abi(contract_abi, web3.codec, function_identifier, args, kwargs)
+        fn_abi = find_matching_fn_abi(contract_abi, web3.codec, function_identifier, fn_args, fn_kwargs)
 
     output_types = get_abi_output_types(fn_abi)
 
@@ -1619,8 +1622,9 @@ def transact_with_contract_function_prepare(
         transaction: Optional[TxParams] = None,
         contract_abi: Optional[ABI] = None,
         fn_abi: Optional[ABIFunction] = None,
-        *args: Any,
-        **kwargs: Any) -> HexBytes:
+        fn_args: Optional[Any] = None,
+        fn_kwargs: Optional[Any] = None
+) -> HexBytes:
     """
     Helper function for interacting with a contract function by sending a
     transaction.
@@ -1632,8 +1636,8 @@ def transact_with_contract_function_prepare(
         contract_abi=contract_abi,
         transaction=transaction,
         fn_abi=fn_abi,
-        fn_args=args,
-        fn_kwargs=kwargs,
+        fn_args=fn_args,
+        fn_kwargs=fn_kwargs,
     )
     return transact_transaction
 
@@ -1646,8 +1650,9 @@ def estimate_gas_for_function_prepare(
         contract_abi: Optional[ABI] = None,
         fn_abi: Optional[ABIFunction] = None,
         block_identifier: Optional[BlockIdentifier] = None,
-        *args: Any,
-        **kwargs: Any) -> int:
+        fn_args: Optional[Any] = None,
+        fn_kwargs: Optional[Any] = None) -> int:
+
     """Estimates gas cost a function call would take.
 
     Don't call this directly, instead use :meth:`Contract.estimateGas`
@@ -1660,8 +1665,8 @@ def estimate_gas_for_function_prepare(
         contract_abi=contract_abi,
         fn_abi=fn_abi,
         transaction=transaction,
-        fn_args=args,
-        fn_kwargs=kwargs,
+        fn_args=fn_args,
+        fn_kwargs=fn_kwargs,
     )
     return estimate_transaction
 
