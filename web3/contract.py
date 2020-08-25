@@ -934,7 +934,7 @@ class ContractFunction:
             self.function_identifier,
             call_transaction,
             fn_args=self.args,
-            kw_args=self.kwargs,
+            fn_kwargs=self.kwargs,
             block_id=block_id,
             contract_abi=self.contract_abi,
             fn_abi=self.abi)
