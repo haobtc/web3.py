@@ -1534,8 +1534,6 @@ def call_contract_function_prepare(
         fn_args=fn_args,
         fn_kwargs=fn_kwargs,
         fn_abi=fn_abi)
-    next_kwargs.update(kwargs)
-
     return call_transaction, next_args, next_kwargs
 
 def call_contract_function_postpare(
